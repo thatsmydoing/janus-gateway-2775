@@ -1,0 +1,16 @@
+general: {
+	#admin_key = "supersecret"		# If set, rooms can be created via API only
+									# if this key is provided in the request
+	#lock_rtp_forward = true		# Whether the admin_key above should be
+									# enforced for RTP forwarding requests too
+	#events = false					# Whether events should be sent to event
+									# handlers (default=true)
+
+	# By default, integers are used as a unique ID for both rooms and participants.
+	# In case you want to use strings instead (e.g., a UUID), set string_ids to true.
+	string_ids = true
+}
+
+room-test: {
+  publishers = 50
+}

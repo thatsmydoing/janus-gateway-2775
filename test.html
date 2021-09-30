@@ -1,0 +1,176 @@
+<html>
+<body>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/webrtc-adapter/6.4.0/adapter.min.js"></script>
+<script type="text/javascript" src="https://janus.conf.meetecho.com/janus.js"></script>
+<script type="text/javascript">
+const SERVER = 'ws://localhost:8188';
+const ROOM = 'test';
+
+const janusInit = new Promise(resolve => {
+  Janus.init({
+    // debug: true,
+    dependencies: Janus.useDefaultDependencies(),
+    callback: resolve,
+  })
+});
+
+function makeDeferred() {
+  const deferred = {};
+  deferred.promise = new Promise((resolve, reject) => {
+    deferred.resolve = resolve;
+    deferred.reject = reject;
+  });
+  return deferred;
+}
+
+function sleep(n) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, n);
+  });
+}
+
+function createSession() {
+  return new Promise((resolve, reject) => {
+    const client = new Janus({
+      server: SERVER,
+      iceServers: [],
+      success: () => resolve(client),
+      error: reject,
+    });
+  });
+}
+
+function attachVideoroom(session) {
+  return new Promise((resolve, reject) => {
+    const handle = session.attach({
+      plugin: 'janus.plugin.videoroom',
+      success: resolve,
+      error: reject,
+    });
+  });
+}
+
+let sessions = [];
+
+async function addClient() {
+  await janusInit;
+
+  const publishDeferred = makeDeferred();
+  const subscribeDeferred = makeDeferred();
+
+  let hasSubscribed = false;
+  const session = await createSession();
+  sessions.push(session);
+
+  const subscribeHandle = await attachVideoroom(session);
+  subscribeHandle.onmessage = (msg, jsep) => {
+    if (jsep) {
+      subscribeHandle.createAnswer({
+        jsep,
+        media: { audioSend: false, videoSend: false },
+        success: (jsep) => {
+          subscribeHandle.send({
+            message: {
+              request: 'start',
+            },
+            jsep
+          })
+        }
+      });
+    }
+    if (msg.started === 'ok') {
+      subscribeDeferred.resolve();
+    }
+  };
+  async function subscribe(publishers) {
+    await publishDeferred.promise;
+
+    const streams = publishers.flatMap((publisher) => {
+      return publisher.streams.map(({ mid }) => ({
+        feed: publisher.id,
+        mid,
+      }));
+    });
+    if (streams.length === 0) {
+      subscribeDeferred.resolve();
+      return;
+    }
+    if (hasSubscribed) {
+      subscribeHandle.send({
+        message: {
+          request: 'subscribe',
+          streams,
+        }
+      });
+    } else {
+      hasSubscribed = true;
+      subscribeHandle.send({
+        message: {
+          request: 'join',
+          ptype: 'subscriber',
+          room: ROOM,
+          streams,
+        }
+      });
+    }
+  }
+
+  const publishHandle = await attachVideoroom(session);
+  publishHandle.onmessage = (msg, jsep) => {
+    switch (msg.videoroom) {
+      case 'joined':
+        publishHandle.createOffer({
+          media: { audioRecv: false, videoRecv: false, audioSend: true, videoSend: true },
+          success: (jsep) => {
+            publishHandle.send({
+              message: {
+                request: 'publish'
+              },
+              jsep,
+            })
+          },
+        });
+        subscribe(msg.publishers);
+        break;
+
+      case 'event':
+        if (jsep) {
+          publishHandle.handleRemoteJsep({
+            success: () => {
+              publishDeferred.resolve();
+            },
+            jsep
+          });
+        }
+        if ('publishers' in msg) {
+          subscribe(msg.publishers);
+        }
+        break;
+    }
+  };
+
+  publishHandle.send({
+    message: {
+      request: 'join',
+      room: ROOM,
+      ptype: 'publisher',
+    }
+  });
+
+  return subscribeDeferred.promise;
+}
+
+async function disconnectAll() {
+  await Promise.all(sessions.map(session => {
+    return new Promise((resolve, reject) => session.destroy({
+      success: resolve,
+      error: reject,
+      cleanupHandle: true,
+    }));
+  }));
+  sessions = [];
+}
+
+</script>
+</body>
+</html>
