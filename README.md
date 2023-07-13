@@ -1,4 +1,4 @@
-Reproduction case for https://github.com/meetecho/janus-gateway/issues/2775
+Reproduction case for https://github.com/meetecho/janus-gateway/issues/3242
 
 ## Setup
 
