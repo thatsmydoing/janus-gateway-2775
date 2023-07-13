@@ -82,6 +82,9 @@ async function addClient() {
       subscribeDeferred.resolve();
     }
   };
+
+  const subscriptions = [];
+
   async function subscribe(publishers) {
     await publishDeferred.promise;
 
@@ -113,7 +116,20 @@ async function addClient() {
         }
       });
     }
+
+    subscriptions.push(...streams);
   }
+
+  function unsubscribe() {
+    subscribeHandle.send({
+      message: {
+        request: 'unsubscribe',
+        streams: subscriptions,
+      },
+    });
+  }
+
+  session._unsubscribe = unsubscribe;
 
   const publishHandle = await attachVideoroom(session);
   publishHandle.onmessage = (msg, jsep) => {
@@ -162,6 +178,7 @@ async function addClient() {
 
 async function disconnectAll() {
   await Promise.all(sessions.map(session => {
+    session._unsubscribe();
     return new Promise((resolve, reject) => session.destroy({
       success: resolve,
       error: reject,
